@@ -1,0 +1,6 @@
+{
+  "name": "CIDR 存活 IP 扫描工具",
+  "description": "高性能网络探测工具，支持 CIDR 范围扫描、实时并发监控与结果导出。",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
