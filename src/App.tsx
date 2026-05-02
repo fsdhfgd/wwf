@@ -119,6 +119,7 @@ export default function App() {
           break;
         case 'live':
           setLiveIps(prev => [...prev, data.ip!]);
+          setProgress(prev => ({ ...prev, liveCount: prev.liveCount + 1 }));
           setLogs(prev => [...prev, `✅ 在线: ${data.ip}`]);
           break;
         case 'progress':
