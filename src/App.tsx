@@ -13,6 +13,9 @@ import {
   Globe,
   Wifi,
   AlertCircle,
+  ArrowLeft,
+  LayoutGrid,
+  LogOut
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -59,6 +62,7 @@ const TerminalLog = ({ logs }: { logs: string[] }) => {
 };
 
 export default function App() {
+  const [view, setView] = useState<'menu' | 'scan'>('menu');
   const [cidr, setCidr] = useState('192.168.1.0/24');
   const [isScanning, setIsScanning] = useState(false);
   const [timeout, setTimeoutVal] = useState(1);
@@ -153,7 +157,7 @@ export default function App() {
     };
 
     es.onerror = () => {
-      setLogs(prev => [...prev, '严重错误: 与扫描服务断开连接。']);
+      setLogs(prev => [...prev, '严重错误: 与扫描服务断开连接（请检查网络或 CIDR 范围）。']);
       setIsScanning(false);
       es.close();
     };
@@ -177,13 +181,87 @@ export default function App() {
     a.click();
   };
 
+  if (view === 'menu') {
+    return (
+      <div className="h-screen bg-bg text-zinc-100 flex items-center justify-center font-sans">
+        <div className="w-[500px] border border-border bg-surface p-8 shadow-2xl relative overflow-hidden backdrop-blur-xl">
+          <div className="absolute top-0 left-0 w-full h-1 bg-accent/20" />
+          
+          <div className="text-center mb-10">
+            <h1 className="text-2xl font-black tracking-[4px] uppercase mb-2">CIDR_SCANNER v2.4</h1>
+            <p className="text-[10px] text-accent font-bold tracking-[2px] uppercase opacity-60">高性能网络探测终端</p>
+          </div>
+
+          <div className="space-y-4">
+            <button 
+              onClick={() => setView('scan')}
+              className="w-full bg-accent text-black font-bold py-4 rounded-sm flex items-center justify-between px-6 group hover:translate-x-1 transition-all active:scale-95"
+            >
+              <div className="flex items-center gap-4">
+                <span className="text-xs opacity-50">01</span>
+                <span className="tracking-widest">开始新的扫描</span>
+              </div>
+              <Globe className="w-5 h-5 group-hover:rotate-12 transition-transform" />
+            </button>
+
+            <div className="grid grid-cols-2 gap-4">
+              <button 
+                onClick={() => setView('scan')}
+                className="bg-[#1a1a1a] border border-border py-4 font-bold rounded-sm flex flex-col items-center gap-2 hover:border-accent transition-all group"
+              >
+                <Activity className="w-5 h-5 text-accent opacity-50 group-hover:opacity-100" />
+                <span className="text-[10px] tracking-widest uppercase font-mono">参数配置</span>
+              </button>
+              <button 
+                onClick={() => setView('scan')}
+                className="bg-[#1a1a1a] border border-border py-4 font-bold rounded-sm flex flex-col items-center gap-2 hover:border-accent transition-all group"
+              >
+                <HistoryIcon className="w-5 h-5 text-accent opacity-50 group-hover:opacity-100" />
+                <span className="text-[10px] tracking-widest uppercase font-mono">历史结果</span>
+              </button>
+            </div>
+
+            <button 
+              className="w-full border border-border text-zinc-500 font-bold py-3 rounded-sm flex items-center justify-between px-6 hover:text-rose-500 hover:border-rose-500/30 transition-all opacity-50"
+              onClick={() => {}}
+            >
+              <div className="flex items-center gap-4">
+                <span className="text-xs">04</span>
+                <span className="text-[10px] uppercase tracking-widest">退出系统</span>
+              </div>
+              <LogOut className="w-4 h-4" />
+            </button>
+          </div>
+
+          <div className="mt-12 pt-6 border-t border-white/5 flex justify-between items-center text-[10px] text-zinc-600 font-mono">
+            <span className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> 系统就绪</span>
+            <span>v2.4.2-PRO</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="h-screen bg-bg text-zinc-100 font-sans overflow-hidden flex flex-col selection:bg-accent selection:text-black">
       {/* Header */}
       <header className="h-[60px] border-b border-border bg-surface px-6 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-3">
-          <div className="w-3 h-3 rounded-full bg-accent shadow-[0_0_8px_theme(colors.accent)]" />
-          <h1 className="text-[14px] font-bold tracking-widest uppercase">CIDR 扫描助手 v2.4</h1>
+        <div className="flex items-center gap-6">
+          <button 
+            onClick={() => {
+              if (isScanning) stopScan();
+              setView('menu');
+            }}
+            className="flex items-center gap-2 text-zinc-500 hover:text-accent transition-colors group"
+          >
+            <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
+            <span className="text-[10px] font-bold uppercase tracking-wider">返回主菜单</span>
+          </button>
+          <div className="h-4 w-[1px] bg-border" />
+          <div className="flex items-center gap-3">
+            <div className="w-3 h-3 rounded-full bg-accent shadow-[0_0_8px_theme(colors.accent)]" />
+            <h1 className="text-[14px] font-bold tracking-widest uppercase">CIDR 扫描助手 v2.4</h1>
+          </div>
         </div>
         
         <div className="flex gap-3">

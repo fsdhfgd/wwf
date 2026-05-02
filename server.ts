@@ -26,6 +26,7 @@ async function startServer() {
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no"); // CRITICAL: Stop proxy buffering
 
     const sendEvent = (data: any) => {
       res.write(`data: ${JSON.stringify(data)}\n\n`);
@@ -52,7 +53,7 @@ async function startServer() {
       try {
         networkAddr = ipaddr.parse(addrPart);
       } catch (e) {
-        sendEvent({ type: "error", message: "IP 地址格式不正确" });
+        sendEvent({ type: "error", message: "IP 地址或格式不正确" });
         res.end();
         return;
       }
@@ -66,12 +67,9 @@ async function startServer() {
       const ipv4Addr = networkAddr as ipaddr.IPv4;
       const numHosts = Math.pow(2, 32 - mask);
       
-      // Calculate start address based on mask
       const ipBytes = ipv4Addr.toByteArray();
-      let ipLong = ((ipBytes[0] << 24) >>> 0) + (ipBytes[1] << 16) + (ipBytes[2] << 8) + ipBytes[3];
-      
-      // Apply mask to get network start
-      const maskLong = (0xFFFFFFFF << (32 - mask)) >>> 0;
+      const ipLong = ((ipBytes[0] << 24) >>> 0) + (ipBytes[1] << 16) + (ipBytes[2] << 8) + ipBytes[3];
+      const maskLong = mask === 0 ? 0 : (0xFFFFFFFF << (32 - mask)) >>> 0;
       const startLong = (ipLong & maskLong) >>> 0;
 
       sendEvent({ type: "start", total: numHosts });
@@ -93,19 +91,27 @@ async function startServer() {
         isAborted = true;
       });
 
+      // Detect OS for ping parameters
+      const isWin = process.platform === "win32";
+      const pingParams = isWin ? ["-n", "1", "-w"] : ["-c", "1", "-W"];
+
       const pingIp = (ip: string) => {
         return new Promise<boolean>((resolve) => {
           if (isAborted) return resolve(false);
-          const p = spawn("ping", ["-c", "1", "-W", timeout.toString(), ip]);
+          const timeoutStr = isWin ? (timeout * 1000).toString() : timeout.toString();
+          const p = spawn("ping", [...pingParams, timeoutStr, ip]);
+          
           p.on("close", (code) => resolve(code === 0));
+          p.on("error", () => resolve(false)); // Exec error (e.g. ping not found)
+
           setTimeout(() => {
             if (p.exitCode === null) p.kill();
             resolve(false);
-          }, (timeout + 1) * 1000);
+          }, (timeout + 2) * 1000);
         });
       };
 
-      // Concurrent Scanning
+      // Faster concurrency for high-density design demo
       const CONCURRENCY = 150; 
       const startScanning = async () => {
         for (let i = 0; i < numHosts; i += CONCURRENCY) {
