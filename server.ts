@@ -33,7 +33,7 @@ async function startServer() {
     };
 
     try {
-      const cleanCidr = (cidr || "").trim();
+      const cleanCidr = (cidr || "").replace(/\s/g, "");
       if (!cleanCidr.includes("/")) {
         sendEvent({ type: "error", message: "格式错误: 必须包含子网掩码 (例如 /24)" });
         res.end();
@@ -43,44 +43,75 @@ async function startServer() {
       const [addrPart, maskPart] = cleanCidr.split("/");
       const mask = parseInt(maskPart);
       
-      if (isNaN(mask) || mask < 0 || mask > 32) {
-        sendEvent({ type: "error", message: "掩码无效: 必须在 0-32 之间" });
-        res.end();
-        return;
-      }
-
-      let networkAddr;
+      let networkAddr: ipaddr.IPv4 | ipaddr.IPv6;
       try {
-        networkAddr = ipaddr.parse(addrPart);
+        networkAddr = ipaddr.parse(addrPart) as ipaddr.IPv4 | ipaddr.IPv6;
       } catch (e) {
         sendEvent({ type: "error", message: "IP 地址或格式不正确" });
         res.end();
         return;
       }
 
-      if (networkAddr.kind() !== 'ipv4') {
-        sendEvent({ type: "error", message: "目前仅支持 IPv4 扫描" });
+      const isIPv6 = networkAddr.kind() === 'ipv6';
+      const maxMask = isIPv6 ? 128 : 32;
+
+      if (isNaN(mask) || mask < 0 || mask > maxMask) {
+        sendEvent({ type: "error", message: `掩码无效: IPv${isIPv6 ? '6' : '4'} 必须在 0-${maxMask} 之间` });
         res.end();
         return;
       }
 
-      const ipv4Addr = networkAddr as ipaddr.IPv4;
-      const numHosts = Math.pow(2, 32 - mask);
+      const totalHosts = isIPv6 ? (1n << BigInt(128 - mask)) : (1n << BigInt(32 - mask));
+      const maxScanLimit = 1024n;
+      const scanCount = totalHosts > maxScanLimit ? maxScanLimit : totalHosts;
+      const numHosts = Number(scanCount);
+
+      const ipBytes = networkAddr.toByteArray();
       
-      const ipBytes = ipv4Addr.toByteArray();
-      const ipLong = ((ipBytes[0] << 24) >>> 0) + (ipBytes[1] << 16) + (ipBytes[2] << 8) + ipBytes[3];
-      const maskLong = mask === 0 ? 0 : (0xFFFFFFFF << (32 - mask)) >>> 0;
-      const startLong = (ipLong & maskLong) >>> 0;
+      // Calculate start address based on mask
+      const getStartAddr = () => {
+        if (!isIPv6) {
+          const ipLong = ((ipBytes[0] << 24) >>> 0) + (ipBytes[1] << 16) + (ipBytes[2] << 8) + ipBytes[3];
+          const maskLong = mask === 0 ? 0 : (0xFFFFFFFF << (32 - mask)) >>> 0;
+          return BigInt((ipLong & maskLong) >>> 0);
+        } else {
+          let ipBig = 0n;
+          for (const byte of ipBytes) ipBig = (ipBig << 8n) | BigInt(byte);
+          const fullMask = (1n << 128n) - 1n;
+          const maskBig = (fullMask << BigInt(128 - mask)) & fullMask;
+          return ipBig & maskBig;
+        }
+      };
+
+      const startLong = getStartAddr();
 
       sendEvent({ type: "start", total: numHosts });
 
-      const longToIp = (long: number) => {
-        return [
-          (long >>> 24) & 0xFF,
-          (long >>> 16) & 0xFF,
-          (long >>> 8) & 0xFF,
-          long & 0xFF
-        ].join(".");
+      if (totalHosts > maxScanLimit) {
+        sendEvent({ 
+          type: "info", 
+          message: `网段容量为 ${totalHosts.toString()} 个地址，为保障性能与系统稳定，已自动优化为扫描前 ${maxScanLimit.toString()} 个地址` 
+        });
+      }
+
+      const longToIp = (long: bigint) => {
+        if (!isIPv6) {
+          const n = Number(long);
+          return [
+            (n >>> 24) & 0xFF,
+            (n >>> 16) & 0xFF,
+            (n >>> 8) & 0xFF,
+            n & 0xFF
+          ].join(".");
+        } else {
+          const bytes = [];
+          let temp = long;
+          for (let i = 0; i < 16; i++) {
+            bytes.unshift(Number(temp & 0xFFn));
+            temp >>= 8n;
+          }
+          return ipaddr.fromByteArray(bytes).toString();
+        }
       };
 
       let scanned = 0;
@@ -101,24 +132,43 @@ async function startServer() {
           const timeoutStr = isWin ? (timeout * 1000).toString() : timeout.toString();
           const p = spawn("ping", [...pingParams, timeoutStr, ip]);
           
-          p.on("close", (code) => resolve(code === 0));
-          p.on("error", () => resolve(false)); // Exec error (e.g. ping not found)
+          let resolved = false;
+          const timer = setTimeout(() => {
+            if (!resolved) {
+              resolved = true;
+              try {
+                if (p.exitCode === null) p.kill("SIGKILL");
+              } catch (e) {}
+              resolve(false);
+            }
+          }, (timeout + 1) * 1000);
 
-          setTimeout(() => {
-            if (p.exitCode === null) p.kill();
-            resolve(false);
-          }, (timeout + 2) * 1000);
+          p.on("close", (code) => {
+            if (!resolved) {
+              resolved = true;
+              clearTimeout(timer);
+              resolve(code === 0);
+            }
+          });
+
+          p.on("error", () => {
+            if (!resolved) {
+              resolved = true;
+              clearTimeout(timer);
+              resolve(false);
+            }
+          });
         });
       };
 
       // Faster concurrency for high-density design demo
-      const CONCURRENCY = 150; 
+      const CONCURRENCY = 64; 
       const startScanning = async () => {
         for (let i = 0; i < numHosts; i += CONCURRENCY) {
           if (isAborted) break;
           
           const batchSize = Math.min(CONCURRENCY, numHosts - i);
-          const batch = Array.from({ length: batchSize }, (_, index) => longToIp(startLong + i + index));
+          const batch = Array.from({ length: batchSize }, (_, index) => longToIp(startLong + BigInt(i + index)));
           
           await Promise.all(batch.map(async (ip) => {
             const isAlive = await pingIp(ip);

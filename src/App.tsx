@@ -20,7 +20,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 
 interface ScanEvent {
-  type: 'start' | 'live' | 'progress' | 'end' | 'error';
+  type: 'start' | 'live' | 'progress' | 'end' | 'error' | 'info';
   total?: number;
   ip?: string;
   scanned?: number;
@@ -135,6 +135,9 @@ export default function App() {
           if (data.scanned! % 25 === 0) {
             setLogs(prev => [...prev, `进度: 已处理 ${data.scanned} / ${data.total}...`]);
           }
+          break;
+        case 'info':
+          setLogs(prev => [...prev, `提示: ${data.message}`]);
           break;
         case 'error':
           setLogs(prev => [...prev, `❌ 错误: ${data.message}`]);
@@ -287,7 +290,7 @@ export default function App() {
         <aside className="w-[240px] border-r border-border bg-surface p-5 flex flex-col gap-6 shrink-0">
           <div className="space-y-4">
             <div className="flex flex-col gap-1.5">
-              <label className="text-[10px] font-bold text-text-secondary uppercase tracking-[1px]">目标 CIDR 地址段</label>
+              <label className="text-[10px] font-bold text-text-secondary uppercase tracking-[1px]">目标 CIDR 地址段 (支持 IPv4/IPv6)</label>
               <input 
                 type="text" 
                 value={cidr}
